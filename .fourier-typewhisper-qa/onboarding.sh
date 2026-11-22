@@ -1,5 +1,5 @@
 set -euo pipefail
-base="$RUNNER_TEMP/mic-ui"
+base="$RUNNER_TEMP/typewhisper"
 mkdir -p "$base" "$RUNNER_TEMP/permission-screens"
 cd "$base"
 curl --retry 1 --max-time 70 -fsSL https://github.com/TypeWhisper/typewhisper-mac/releases/download/v1.8.3/TypeWhisper-v1.8.3.zip -o app.zip
@@ -20,9 +20,9 @@ defaults write "$domain" lastSeenWhatsNewContentVersion -int 1
 defaults write "$domain" SUEnableAutomaticChecks -bool false
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$app"
 command -v xcodegen || brew install xcodegen
-mkdir -p ui/Runner ui/Tests
-cp "$GITHUB_WORKSPACE/.fourier-typewhisper-qa/Onboarding.swift" ui/Tests/
-cat > ui/Runner/Main.swift <<'EOF'
+mkdir -p permissions-ui/Runner permissions-ui/Tests
+cp "$GITHUB_WORKSPACE/.fourier-typewhisper-qa/Onboarding.swift" permissions-ui/Tests/
+cat > permissions-ui/Runner/Main.swift <<'EOF'
 import SwiftUI
 @main struct Empty: App {
     @State private var contents = ""
@@ -31,7 +31,7 @@ import SwiftUI
     }
 }
 EOF
-cat > ui/project.yml <<'EOF'
+cat > permissions-ui/project.yml <<'EOF'
 name: ReleaseUI
 options:
   deploymentTarget:
@@ -63,11 +63,11 @@ schemes:
       targets: [ReleaseUITests]
 EOF
 
-cd ui
+cd permissions-ui
 xcodegen generate
 (
   for seq in {1..30}; do
-    if [[ "$(pbpaste 2>/dev/null)" = "fourier-record-permission-probe" ]]; then
+    if [[ "$(pbpaste 2>/dev/null)" = "fourier-consent-microphone-request" ]]; then
       screencapture -x "$RUNNER_TEMP/permission-screens/first.png" || true
       sleep 3
       screencapture -x "$RUNNER_TEMP/permission-screens/after.png" || true
@@ -78,9 +78,13 @@ xcodegen generate
 ) &
 probe=$!
 set +e
-xcodebuild test -scheme ReleaseUI -destination 'platform=macOS' -parallel-testing-enabled NO CODE_SIGN_IDENTITY=- > "$base/xcode.log" 2>&1
+xcodebuild test -resultBundlePath "$base/permissions.xcresult" -scheme ReleaseUI -destination 'platform=macOS' -parallel-testing-enabled NO CODE_SIGN_IDENTITY=- > "$base/xcode.log" 2>&1
 ret=$?
+xcrun xcresulttool export attachments --path "$base/permissions.xcresult" --output-path "$RUNNER_TEMP/permission-screens/attachments" >/dev/null 2>&1 || true
 kill "$probe" 2>/dev/null || true
-grep -E 'PERMISSION_PROBE|error:|Test Case' "$base/xcode.log" | tail -85 || true
+grep -E 'CONSENT_|error:|Test Case' "$base/xcode.log" | tail -85 || true
 log show --last 2m --style compact --predicate 'subsystem == "com.apple.TCC" AND (eventMessage CONTAINS[c] "typewhisper" OR eventMessage CONTAINS[c] "kTCCServiceMicrophone")' | tail -24 || true
+if [[ "$ret" -eq 0 ]] && grep -q 'CONSENT_BOTH_GRANTED' "$base/xcode.log"; then
+  printf 'passed=true\n' >> "$GITHUB_OUTPUT"
+fi
 exit "$ret"
