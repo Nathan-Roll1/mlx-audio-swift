@@ -23,6 +23,9 @@ mkdir -p "$HOME/Library/Application Support/TypeWhisper/Plugins"
 ditto "$plugin" "$HOME/Library/Application Support/TypeWhisper/Plugins/Qwen3Plugin.bundle"
 defaults write "$domain" plugin.com.typewhisper.qwen3.enabled -bool true
 defaults write "$domain" apiServerEnabled -bool false
+# Choose the ordinary free GPL/OSS scenario for the isolated test account.
+defaults write "$domain" usageIntent -string personalOSS
+defaults write "$domain" welcomeSheetShown -bool true
 defaults write "$domain" setupWizardCompleted -bool true
 defaults write "$domain" SUEnableAutomaticChecks -bool false
 open -gna "$app"

@@ -22,12 +22,17 @@ final class SignedAppUI: XCTestCase {
         print("SERVICES_NAME",svc,base.lastPathComponent)
         XCTAssertTrue(NSPerformService(svc,p),"Signed application file service failed")
         let button=app.buttons.matching(NSPredicate(format:"label CONTAINS[c] 'Transcribe All' OR title CONTAINS[c] 'Transcribe All'")).firstMatch
+        if welcome.waitForExistence(timeout: 5) {
+            welcome.click()
+            print("SIGNED_GUI_WELCOME_AFTER_SERVICE")
+        }
         guard button.waitForExistence(timeout:60) else { print("GUI_TREE " + app.debugDescription.prefix(21000).replacingOccurrences(of: "\n", with: "\nGUI_TREE "));return XCTFail("File transcription button unavailable") }
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == YES"), object: button)
         guard XCTWaiter.wait(for: [ready], timeout: 120) == .completed else {
             print("GUI_TREE " + app.debugDescription.prefix(21000).replacingOccurrences(of: "\n", with: "\nGUI_TREE "))
             return XCTFail("File transcription control disabled after plugin load")
         }
+        print("SIGNED_GUI_FILE_BUTTON", button.debugDescription)
         button.click()
         let stop=Date().addingTimeInterval(170)
         while Date()<stop {
