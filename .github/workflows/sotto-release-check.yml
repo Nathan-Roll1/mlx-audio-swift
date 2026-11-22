@@ -1,0 +1,17 @@
+name: Verify the shipped Sotto file recognizer
+on:
+  push:
+    branches: [ci/fourier-sotto-release]
+permissions:
+  contents: read
+jobs:
+  stock-macos:
+    runs-on: xcode-27
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          sparse-checkout: qa/sotto
+          persist-credentials: false
+      - name: Verify stock release and transcribe public clips
+        run: bash qa/sotto/check.sh
