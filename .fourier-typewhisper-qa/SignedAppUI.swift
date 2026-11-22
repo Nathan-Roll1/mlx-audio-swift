@@ -10,7 +10,9 @@ final class SignedAppUI: XCTestCase {
         let field = sink.textViews.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.click()
-        try Data("ready".utf8).write(to: URL(fileURLWithPath: "/tmp/fourier-typewhisper-editor-ready"))
+        let board = NSPasteboard.general
+        board.clearContents()
+        XCTAssertTrue(board.setString("fourier-test-editor-ready", forType: .string))
         let result = URL(fileURLWithPath: "/tmp/fourier-typewhisper-mic-result.json")
         let clock = Date().addingTimeInterval(150)
         var scanned = false

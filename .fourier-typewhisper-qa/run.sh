@@ -122,7 +122,7 @@ schemes:
 EOF
 cd ui
 xcodegen generate
-rm -f /tmp/fourier-typewhisper-editor-ready /tmp/fourier-typewhisper-mic-result.json
+rm -f /tmp/fourier-typewhisper-mic-result.json
 python3 /tmp/fourier-typewhisper-mic.py > "$base/controller.log" 2>&1 &
 controller=$!
 set +e

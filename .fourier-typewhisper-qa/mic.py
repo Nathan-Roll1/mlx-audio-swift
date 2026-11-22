@@ -18,7 +18,7 @@ def request(path, method='GET'):
     return json.load(urllib.request.urlopen(req, timeout=45))
 try:
     for _ in range(240):
-        if Path('/tmp/fourier-typewhisper-editor-ready').is_file(): break
+        if subprocess.run(['/usr/bin/pbpaste'], capture_output=True).stdout == b'fourier-test-editor-ready': break
         time.sleep(1)
     else: raise RuntimeError('Focused external editor did not signal readiness')
     setup = json.loads(Path('/tmp/fourier-signed-ui-fixture.json').read_text())
