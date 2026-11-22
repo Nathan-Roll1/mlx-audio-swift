@@ -1,0 +1,20 @@
+name: Confirm the signed TypeWhisper app's ordinary microphone onboarding path
+on:
+  push:
+    branches: [ci/typewhisper-onboarding-mic]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: macos-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect microphone onboarding in the unmodified app without downloading any model
+        run: bash .fourier-typewhisper-qa/onboarding.sh
+      - name: Save the disposable runner's before/after screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: typewhisper-permission-screens
+          path: ${{ runner.temp }}/permission-screens
