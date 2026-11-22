@@ -1,0 +1,30 @@
+name: Check an ordinary microphone input for TypeWhisper
+on:
+  push:
+    branches: [ci/typewhisper-audio-device]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: macos-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check original signed BlackHole package and CoreAudio device on the disposable Mac
+        run: |
+          set -euo pipefail
+          curl --retry 2 -fsSL https://existential.audio/downloads/BlackHole2ch-0.7.1.pkg -o "$RUNNER_TEMP/BlackHole.pkg"
+          cd "$RUNNER_TEMP"
+          echo '57b540f27a3e29c37e310e01bee0fdfab76733087e47f997ef9dccf851400dcf  BlackHole.pkg' | shasum -a 256 -c
+          pkgutil --check-signature BlackHole.pkg
+          sudo installer -pkg BlackHole.pkg -target /
+          sudo killall coreaudiod || true
+          brew install switchaudio-osx
+          for retry in {1..12}; do
+            if SwitchAudioSource -a -t input | grep -Fx 'BlackHole 2ch'; then break; fi
+            sleep 2
+          done
+          SwitchAudioSource -t input -s 'BlackHole 2ch'
+          SwitchAudioSource -t output -s 'BlackHole 2ch'
+          echo "AUDIO_TEST_INPUT=$(SwitchAudioSource -t input -c)"
+          echo "AUDIO_TEST_OUTPUT=$(SwitchAudioSource -t output -c)"
+          swift -e 'import AVFoundation;print("AUDIO_TEST_MIC_AUTH",AVCaptureDevice.authorizationStatus(for:.audio).rawValue)'
