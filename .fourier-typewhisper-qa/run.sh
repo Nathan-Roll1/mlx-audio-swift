@@ -26,6 +26,10 @@ defaults write "$domain" apiServerEnabled -bool false
 # Choose the ordinary free GPL/OSS scenario for the isolated test account.
 defaults write "$domain" usageIntent -string personalOSS
 defaults write "$domain" welcomeSheetShown -bool true
+# The release's one-time iOS-companion and release-notes sheets are acknowledged
+# in a normal existing user's profile. Both sheets otherwise obscure Files.
+defaults write "$domain" iOSCompanionPromoCampaign -string ios-app-store-launch-2026-09
+defaults write "$domain" lastSeenWhatsNewContentVersion -int 1
 defaults write "$domain" setupWizardCompleted -bool true
 defaults write "$domain" SUEnableAutomaticChecks -bool false
 open -gna "$app"
@@ -119,7 +123,8 @@ xcodegen generate
 set +e
 xcodebuild test -scheme ReleaseUI -destination 'platform=macOS' -parallel-testing-enabled NO CODE_SIGN_IDENTITY=- > "$base/ui.log" 2>&1
 ret=$?
-grep -E 'SERVICES_NAME|SIGNED_GUI_|GUI_TREE|error:|XCTAssert|failed|Test Case' "$base/ui.log" | tail -100 || true
+grep -E 'SERVICES_NAME|SIGNED_GUI_|error:|XCTAssert|failed|Test Case' "$base/ui.log" || true
+grep -E 'GUI_TREE' "$base/ui.log" | grep -Ev "MenuItem|Menu,|MenuBar" | head -300 || true
 /usr/bin/log show --last 4m --style compact --predicate 'process == "TypeWhisper" && (messageType == error || messageType == fault)' | tail -40 || true
 echo "SIGNED_GUI_EXIT=$ret"
 exit "$ret"
