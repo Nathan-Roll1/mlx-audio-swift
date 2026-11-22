@@ -15,7 +15,7 @@ jobs:
         working-directory: app
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.0.app/Contents/Developer
-      NATIVE_ARCHIVES: ${{ runner.temp }}/native-archives
+      NATIVE_ARCHIVES: ${{ github.workspace }}/app/dist/ci/native-archives
     steps:
     - name: Read QA files
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
