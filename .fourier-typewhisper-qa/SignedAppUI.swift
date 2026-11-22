@@ -1,67 +1,69 @@
 import AppKit
 import XCTest
+
 final class SignedAppUI: XCTestCase {
-    func testFilesService() throws {
-        let base=URL(fileURLWithPath:NSTemporaryDirectory()).deletingLastPathComponent()
-        let shared=URL(fileURLWithPath:"/tmp/fourier-signed-ui-fixture.json")
-        let cfg=try XCTUnwrap(try JSONSerialization.jsonObject(with:Data(contentsOf:shared)) as? [String:String])
-        let app=XCUIApplication(bundleIdentifier:try XCTUnwrap(cfg["bundle"]))
+    func testRealMicrophone() throws {
+        let app = XCUIApplication(bundleIdentifier: "com.typewhisper.mac")
         app.launch()
-        XCTAssertTrue(app.wait(for:.runningForeground,timeout:15) || app.state == .runningBackground)
-        let welcome = app.buttons.matching(NSPredicate(format:"label BEGINSWITH 'GPLv3 / OSS'")).firstMatch
-        if welcome.waitForExistence(timeout: 15) {
-            welcome.click()
-            let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == NO"), object: welcome)
-            XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 8), .completed)
-            print("SIGNED_GUI_WELCOME_FINISHED")
-        }
-        let p=NSPasteboard.withUniqueName()
-        let wav=URL(fileURLWithPath:try XCTUnwrap(cfg["wav"]))
-        p.writeObjects([wav as NSURL])
-        let svc=try XCTUnwrap(cfg["service"])
-        print("SERVICES_NAME",svc,base.lastPathComponent)
-        XCTAssertTrue(NSPerformService(svc,p),"Signed application file service failed")
-        let button=app.buttons.matching(NSPredicate(format:"label CONTAINS[c] 'Transcribe All' OR title CONTAINS[c] 'Transcribe All'")).firstMatch
-        if welcome.waitForExistence(timeout: 5) {
-            welcome.click()
-            print("SIGNED_GUI_WELCOME_AFTER_SERVICE")
-        }
-        guard button.waitForExistence(timeout:60) else { print("GUI_TREE " + app.debugDescription.prefix(21000).replacingOccurrences(of: "\n", with: "\nGUI_TREE "));return XCTFail("File transcription button unavailable") }
-        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == YES"), object: button)
-        guard XCTWaiter.wait(for: [ready], timeout: 120) == .completed else {
-            print("GUI_TREE " + app.debugDescription.prefix(21000).replacingOccurrences(of: "\n", with: "\nGUI_TREE "))
-            return XCTFail("File transcription control disabled after plugin load")
-        }
-        print("SIGNED_GUI_FILE_BUTTON", button.debugDescription)
-        button.click()
-        let stop=Date().addingTimeInterval(170)
-        while Date()<stop {
-            let copy = app.buttons.matching(NSPredicate(format:"label BEGINSWITH[c] 'Copy transcript of'")).firstMatch
-            if copy.exists && copy.isEnabled {
-                copy.click()
-                let txt = NSPasteboard.general.string(forType: .string) ?? ""
-                if txt.lowercased().contains("what your country can do for you") {
-                    print("SIGNED_GUI_TRANSCRIPT", txt)
-                    let sink = XCUIApplication()
-                    sink.launch()
-                    let field = sink.textViews.firstMatch
-                    XCTAssertTrue(field.waitForExistence(timeout: 10))
-                    field.click()
-                    field.typeKey("v", modifierFlags: .command)
-                    let visible = field.value as? String ?? ""
-                    XCTAssertTrue(visible.lowercased().contains("what your country can do for you"),visible)
-                    print("SIGNED_GUI_PASTED", visible)
-                    return
+        let sink = XCUIApplication()
+        sink.launch()
+        let field = sink.textViews.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        field.click()
+        let runner = Process()
+        runner.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        runner.arguments = ["/tmp/fourier-typewhisper-mic.py"]
+        try runner.run()
+        let result = URL(fileURLWithPath: "/tmp/fourier-typewhisper-mic-result.json")
+        let clock = Date().addingTimeInterval(150)
+        var scanned = false
+        while Date() < clock {
+            if let bytes = try? Data(contentsOf: result), let state = (try? JSONSerialization.jsonObject(with: bytes)) as? [String:Any] {
+                if state["stage"] as? String == "failure" {
+                    return XCTFail("Signed microphone system failed: " + (state["detail"] as? String ?? "unknown"))
+                }
+                if state["stage"] as? String == "transcribed" {
+                    guard let raw = state["text"] as? String, raw.lowercased().contains("what your country can do for you")
+                    else {return XCTFail("Unexpected recording: " + (state["text"] as? String ?? "nil"))}
+                    print("SIGNED_GUI_MIC_TRANSCRIPT", raw, state["model"] ?? "", state["engine"] ?? "")
+                    let until = Date().addingTimeInterval(8)
+                    while Date() < until {
+                        if let visible = field.value as? String, visible.lowercased().contains("what your country can do for you") {
+                            print("SIGNED_GUI_AUTOMATIC_MIC_PASTE", visible)
+                            return
+                        }
+                        RunLoop.current.run(until: Date().addingTimeInterval(.35))
+                    }
+                    // Only paste a transcript already placed on the clipboard by the app.
+                    let clip = NSPasteboard.general.string(forType: .string) ?? ""
+                    if clip.lowercased().contains("what your country can do for you") {
+                        field.click()
+                        field.typeKey("v", modifierFlags: .command)
+                        let visible = field.value as? String ?? ""
+                        XCTAssertTrue(visible.lowercased().contains("what your country can do for you"))
+                        print("SIGNED_GUI_MANUAL_MIC_PASTE", visible)
+                        return
+                    }
+                    return XCTFail("Released app captured the microphone transcript; external insertion was not observed.")
                 }
             }
-            let paths=(try? FileManager.default.contentsOfDirectory(at:wav.deletingLastPathComponent(),includingPropertiesForKeys:nil)) ?? []
-            for path in paths where ["txt","md"].contains(path.pathExtension) && path.lastPathComponent.lowercased().contains("jfk") {
-                if let txt=try? String(contentsOf:path),txt.lowercased().contains("what your country can do for you") { print("SIGNED_GUI_TRANSCRIPT", path.lastPathComponent,txt); return }
+            if !scanned && Date() > clock.addingTimeInterval(-143) {
+                scanned = true
+                for identifier in ["com.apple.SecurityAgent", "com.apple.CoreServicesUIAgent", "com.apple.UserNotificationCenter"] {
+                    let system = XCUIApplication(bundleIdentifier: identifier)
+                    guard system.state == .runningForeground || system.state == .runningBackground else {continue}
+                    let dialog = system.debugDescription.lowercased()
+                    if dialog.contains("microphone") && dialog.contains("typewhisper") {
+                        for name in ["Allow","OK"] where system.buttons[name].exists {
+                            system.buttons[name].click()
+                            print("SIGNED_GUI_NORMAL_MIC_AUTHORIZED")
+                            break
+                        }
+                    }
+                }
             }
-            if app.debugDescription.lowercased().contains("what your country can do for you") {print("SIGNED_GUI_TRANSCRIPT",app.debugDescription.prefix(12000));return}
-            RunLoop.current.run(until:Date().addingTimeInterval(2))
+            RunLoop.current.run(until: Date().addingTimeInterval(.5))
         }
-        print("GUI_TREE " + app.debugDescription.prefix(21000).replacingOccurrences(of: "\n", with: "\nGUI_TREE "))
-        XCTFail("No transcript was visible or exported by the desktop app.")
+        XCTFail("The unmodified application did not return the microphone transcript in time.")
     }
 }

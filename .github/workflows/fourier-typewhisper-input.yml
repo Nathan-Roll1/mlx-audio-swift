@@ -7,8 +7,9 @@ permissions:
 jobs:
   test:
     runs-on: macos-latest
-    timeout-minutes: 8
+    timeout-minutes: 30
     steps:
+      - uses: actions/checkout@v4
       - name: Check original signed BlackHole package and CoreAudio device on the disposable Mac
         run: |
           set -euo pipefail
@@ -28,3 +29,5 @@ jobs:
           echo "AUDIO_TEST_INPUT=$(SwitchAudioSource -t input -c)"
           echo "AUDIO_TEST_OUTPUT=$(SwitchAudioSource -t output -c)"
           swift -e 'import AVFoundation;print("AUDIO_TEST_MIC_AUTH",AVCaptureDevice.authorizationStatus(for:.audio).rawValue)'
+      - name: Use the signed TypeWhisper release to dictate into an independent AppKit field
+        run: bash .fourier-typewhisper-qa/run.sh

@@ -22,7 +22,8 @@ plutil -extract NSServices json -o - "$app/Contents/Info.plist" || true
 mkdir -p "$HOME/Library/Application Support/TypeWhisper/Plugins"
 ditto "$plugin" "$HOME/Library/Application Support/TypeWhisper/Plugins/Qwen3Plugin.bundle"
 defaults write "$domain" plugin.com.typewhisper.qwen3.enabled -bool true
-defaults write "$domain" apiServerEnabled -bool false
+defaults write "$domain" apiServerEnabled -bool true
+defaults write "$domain" apiServerRequiresAuthentication -bool true
 # Choose the ordinary free GPL/OSS scenario for the isolated test account.
 defaults write "$domain" usageIntent -string personalOSS
 defaults write "$domain" welcomeSheetShown -bool true
@@ -76,6 +77,7 @@ n=s['NSMenuItem']['default'];print('SERVICE',n)
 open('/tmp/fourier-signed-ui-fixture.json','w').write(json.dumps({'service':n,'bundle':sys.argv[2],'wav':sys.argv[3]}))
 PY
 command -v xcodegen || brew install xcodegen
+cp "$GITHUB_WORKSPACE/.fourier-typewhisper-qa/mic.py" /tmp/fourier-typewhisper-mic.py
 mkdir -p ui/Runner ui/Tests
 cp "$GITHUB_WORKSPACE/.fourier-typewhisper-qa/SignedAppUI.swift" ui/Tests/
 cat > ui/Runner/Main.swift <<'EOF'
@@ -123,6 +125,7 @@ xcodegen generate
 set +e
 xcodebuild test -scheme ReleaseUI -destination 'platform=macOS' -parallel-testing-enabled NO CODE_SIGN_IDENTITY=- > "$base/ui.log" 2>&1
 ret=$?
+cat /tmp/fourier-typewhisper-mic-result.json 2>/dev/null || true
 grep -E 'SERVICES_NAME|SIGNED_GUI_|error:|XCTAssert|failed|Test Case' "$base/ui.log" || true
 grep -E 'GUI_TREE' "$base/ui.log" | grep -Ev "MenuItem|Menu,|MenuBar" | head -300 || true
 /usr/bin/log show --last 4m --style compact --predicate 'process == "TypeWhisper" && (messageType == error || messageType == fault)' | tail -40 || true
