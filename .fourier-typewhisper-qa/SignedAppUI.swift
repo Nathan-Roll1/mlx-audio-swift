@@ -10,10 +10,7 @@ final class SignedAppUI: XCTestCase {
         let field = sink.textViews.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.click()
-        let runner = Process()
-        runner.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        runner.arguments = ["/tmp/fourier-typewhisper-mic.py"]
-        try runner.run()
+        try Data("ready".utf8).write(to: URL(fileURLWithPath: "/tmp/fourier-typewhisper-editor-ready"))
         let result = URL(fileURLWithPath: "/tmp/fourier-typewhisper-mic-result.json")
         let clock = Date().addingTimeInterval(150)
         var scanned = false
@@ -50,6 +47,8 @@ final class SignedAppUI: XCTestCase {
             if !scanned && Date() > clock.addingTimeInterval(-143) {
                 scanned = true
                 for identifier in ["com.apple.SecurityAgent", "com.apple.CoreServicesUIAgent", "com.apple.UserNotificationCenter"] {
+                    guard NSWorkspace.shared.urlForApplication(withBundleIdentifier: identifier) != nil,
+                          !NSRunningApplication.runningApplications(withBundleIdentifier: identifier).isEmpty else { continue }
                     let system = XCUIApplication(bundleIdentifier: identifier)
                     guard system.state == .runningForeground || system.state == .runningBackground else {continue}
                     let dialog = system.debugDescription.lowercased()

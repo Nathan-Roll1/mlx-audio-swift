@@ -122,9 +122,14 @@ schemes:
 EOF
 cd ui
 xcodegen generate
+rm -f /tmp/fourier-typewhisper-editor-ready /tmp/fourier-typewhisper-mic-result.json
+python3 /tmp/fourier-typewhisper-mic.py > "$base/controller.log" 2>&1 &
+controller=$!
 set +e
 xcodebuild test -scheme ReleaseUI -destination 'platform=macOS' -parallel-testing-enabled NO CODE_SIGN_IDENTITY=- > "$base/ui.log" 2>&1
 ret=$?
+kill "$controller" 2>/dev/null || true
+cat "$base/controller.log"
 cat /tmp/fourier-typewhisper-mic-result.json 2>/dev/null || true
 grep -E 'SERVICES_NAME|SIGNED_GUI_|error:|XCTAssert|failed|Test Case' "$base/ui.log" || true
 grep -E 'GUI_TREE' "$base/ui.log" | grep -Ev "MenuItem|Menu,|MenuBar" | head -300 || true
