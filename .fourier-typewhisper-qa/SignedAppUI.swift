@@ -8,6 +8,13 @@ final class SignedAppUI: XCTestCase {
         let app=XCUIApplication(bundleIdentifier:try XCTUnwrap(cfg["bundle"]))
         app.launch()
         XCTAssertTrue(app.wait(for:.runningForeground,timeout:15) || app.state == .runningBackground)
+        let welcome = app.buttons.matching(NSPredicate(format:"label BEGINSWITH 'GPLv3 / OSS'")).firstMatch
+        if welcome.waitForExistence(timeout: 15) {
+            welcome.click()
+            let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == NO"), object: welcome)
+            XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 8), .completed)
+            print("SIGNED_GUI_WELCOME_FINISHED")
+        }
         let p=NSPasteboard.withUniqueName()
         let wav=URL(fileURLWithPath:try XCTUnwrap(cfg["wav"]))
         p.writeObjects([wav as NSURL])
