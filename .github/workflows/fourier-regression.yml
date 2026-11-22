@@ -1,0 +1,36 @@
+name: Strict Qwen3-ASR checkpoint regression
+on:
+  push:
+    branches: [ci/fourier-swift-regression]
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: macos-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest
+      - name: Compile and assert the named checkpoint test actually ran
+        run: |
+          set -euo pipefail
+          uname -m
+          xcodebuild -version
+          xcodebuild -downloadComponent MetalToolchain
+          xcodebuild test -scheme MLXAudio-Package -destination 'platform=macOS' -parallel-testing-enabled NO -only-testing:'MLXAudioTests/Qwen3ASREncoderTests' -resultBundlePath /tmp/QwenTest.xcresult MACOSX_DEPLOYMENT_TARGET=14.0 CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO >/tmp/xcode.log 2>&1 || { tail -150 /tmp/xcode.log; exit 1; }
+          xcrun xcresulttool get test-results tests --compact --path /tmp/QwenTest.xcresult > /tmp/tests.json
+          python3 - <<'PY'
+          import json
+          def walk(x):
+              if isinstance(x,dict):
+                  if x.get('name') and 'transformersCheckpointMatchesMLXParameters' in x.get('name',''):
+                      yield x
+                  for v in x.values():yield from walk(v)
+              if isinstance(x,list):
+                  for v in x:yield from walk(v)
+          with open('/tmp/tests.json') as f: rows=list(walk(json.load(f)))
+          print('Named regression result:',rows)
+          assert any(str(x.get('result','')).lower()=='passed' for x in rows), rows
+          PY
