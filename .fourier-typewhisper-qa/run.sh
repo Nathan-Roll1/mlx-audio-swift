@@ -21,6 +21,7 @@ echo "BUNDLE_ID=$domain"
 plutil -extract NSServices json -o - "$app/Contents/Info.plist" || true
 mkdir -p "$HOME/Library/Application Support/TypeWhisper/Plugins"
 ditto "$plugin" "$HOME/Library/Application Support/TypeWhisper/Plugins/Qwen3Plugin.bundle"
+defaults write "$domain" plugin.com.typewhisper.qwen3.enabled -bool true
 defaults write "$domain" apiServerEnabled -bool false
 defaults write "$domain" setupWizardCompleted -bool true
 defaults write "$domain" SUEnableAutomaticChecks -bool false

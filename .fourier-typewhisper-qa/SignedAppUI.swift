@@ -16,7 +16,11 @@ final class SignedAppUI: XCTestCase {
         XCTAssertTrue(NSPerformService(svc,p),"Signed application file service failed")
         let button=app.buttons.matching(NSPredicate(format:"label CONTAINS[c] 'Transcribe All' OR title CONTAINS[c] 'Transcribe All'")).firstMatch
         guard button.waitForExistence(timeout:60) else { print(app.debugDescription.prefix(18000));return XCTFail("File transcription button unavailable") }
-        guard button.isEnabled else {print(app.debugDescription.prefix(18000));return XCTFail("File transcription control disabled")}
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == YES"), object: button)
+        guard XCTWaiter.wait(for: [ready], timeout: 120) == .completed else {
+            print(app.debugDescription.prefix(18000))
+            return XCTFail("File transcription control disabled after plugin load")
+        }
         button.click()
         let stop=Date().addingTimeInterval(100)
         while Date()<stop {
