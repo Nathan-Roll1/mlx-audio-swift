@@ -1,0 +1,73 @@
+name: Direct-file Airdraft model verification
+'on':
+  push:
+    branches:
+    - ci/fourier-airdraft-qualification
+jobs:
+  test:
+    name: Airdraft released project and local Fourier model
+    runs-on: xcode-27
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: app
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.0.app/Contents/Developer
+      NATIVE_ARCHIVES: ${{ runner.temp }}/native-archives
+    steps:
+    - name: Read QA files
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        sparse-checkout: qa/airdraft-fourier
+        persist-credentials: false
+    - name: Check out released Airdraft
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        repository: lstudlo-com/airdraft
+        ref: 55e39acddef13a87331ee807c37d723e6412b5fd
+        path: app
+        persist-credentials: false
+    - name: Apply candidate and place public fixtures
+      run: bash "$GITHUB_WORKSPACE/qa/airdraft-fourier/prepare.sh"
+    - name: Show toolchain
+      run: 'sw_vers
+
+        xcodebuild -version
+
+        swift --version
+
+        '
+    - name: Install the Metal toolchain
+      run: "if ! xcodebuild -showComponent MetalToolchain 2>/dev/null | grep -q 'Status: installed'; then\n  xcodebuild -downloadComponent MetalToolchain\n\
+        fi\nxcodebuild -showComponent MetalToolchain\n"
+    - name: Install pinned XcodeGen
+      run: "tools=\"$RUNNER_TEMP/xcodegen-2.46.0\"\nmkdir -p \"$tools\"\ncurl --fail --silent --show-error --location --proto '=https' --proto-redir\
+        \ '=https' --retry 3 \\\n  --output \"$tools/xcodegen.zip\" https://github.com/yonaskolb/XcodeGen/releases/download/2.46.0/xcodegen.zip\n\
+        expected=$(python3 -c 'import sys; sys.path.insert(0, \"scripts\"); import release; print(release.XCODEGEN_SHA256)')\necho \"$expected\
+        \  $tools/xcodegen.zip\" | shasum -a 256 --check\nditto -xk \"$tools/xcodegen.zip\" \"$tools\"\npython3 -c 'import sys; sys.path.insert(0,\
+        \ \"scripts\"); import release; sys.exit(0 if release.pinned_xcodegen(sys.argv[1]) else 1)' \\\n  \"$tools/xcodegen/bin/xcodegen\"\necho\
+        \ \"$tools/xcodegen/bin\" >> \"$GITHUB_PATH\"\n"
+    - name: Prepare Sherpa-ONNX libraries
+      run: "mkdir -p \"$NATIVE_ARCHIVES\"\npython3 - <<'PY'\nimport json, os, pathlib, subprocess, urllib.parse\narchives = pathlib.Path(os.environ[\"\
+        NATIVE_ARCHIVES\"])\ninputs = json.loads(pathlib.Path(\"Packages/SherpaOnnxKit/native-inputs.json\").read_text())\nfor item in inputs[\"\
+        libraries\"]:\n    target = archives / pathlib.Path(urllib.parse.urlsplit(item[\"url\"]).path).name\n    if not target.is_file():\n  \
+        \      subprocess.run([\"curl\", \"--fail\", \"--silent\", \"--show-error\", \"--location\",\n                        \"--proto\", \"\
+        =https\", \"--proto-redir\", \"=https\", \"--retry\", \"3\",\n                        item[\"url\"], \"--output\", str(target)], check=True)\n\
+        PY\npython3 scripts/native_inputs.py prepare --archives \"$NATIVE_ARCHIVES\"\n"
+    - name: Generate the Xcode project
+      run: 'test "$(command -v xcodegen)" = "$RUNNER_TEMP/xcodegen-2.46.0/xcodegen/bin/xcodegen"
+
+        python3 scripts/generate-project.py
+
+        '
+    - name: Run original project and optional full-size proof
+      run: python3 scripts/test-local-e2e.py --unsigned --timeout 1750 --output "$RUNNER_TEMP/airdraft-tests"
+    - name: Read named test results
+      if: always()
+      run: "set -eu\nxc=$(find \"$RUNNER_TEMP/airdraft-tests\" -name '*.xcresult' -print -quit)\ntest -n \"$xc\"\nxcrun xcresulttool get test-results\
+        \ tests --path \"$xc\" > \"$RUNNER_TEMP/test-cases.json\"\npython3 - \"$RUNNER_TEMP/test-cases.json\" <<'PYREAD'\nimport json,sys\nwanted=['testFourierDownloadAndOfflineDecodeOnAppleSilicon','testCatalogIsPinnedKeepsIdentitiesAndEnforcesLanguageAndStorageRules']\n\
+        results={}\ndef visit(node):\n if isinstance(node,list):\n  for c in node:visit(c)\n elif isinstance(node,dict):\n  for case in wanted:\n\
+        \   if node.get('name','').startswith(case):results[case]=node.get('result')\n  for c in node.values():visit(c)\nvisit(json.load(open(sys.argv[1])))\n\
+        print(results); assert set(results)==set(wanted) and all(str(v).lower()=='passed' for v in results.values()), results\nPYREAD\n"
