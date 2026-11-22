@@ -1,0 +1,14 @@
+name: Verify released TypeWhisper and its signed Qwen3 ASR plugin
+on:
+  push:
+    branches: [ci/signed-typewhisper-fourier]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify release checksums and signatures, import original weights, and transcribe
+        run: bash .fourier-typewhisper-qa/run.sh
