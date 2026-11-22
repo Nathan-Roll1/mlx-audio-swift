@@ -1,0 +1,52 @@
+name: Verify native Qwen3-ASR on macOS
+on:
+  push:
+    branches: [ci/fourier-swift-native]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: macos-latest
+    timeout-minutes: 38
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest
+      - name: Set up Metal and report architecture
+        run: |
+          uname -m
+          xcodebuild -version
+          xcodebuild -downloadComponent MetalToolchain
+      - name: Run native, thinker and preconverted layout regression
+        run: >
+          xcodebuild test -scheme MLXAudio-Package -destination 'platform=macOS'
+          -derivedDataPath /tmp/FourierDerived -parallel-testing-enabled NO
+          -only-testing:'MLXAudioTests/Qwen3ASREncoderTests'
+          MACOSX_DEPLOYMENT_TARGET=14.0 CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO
+      - name: Fetch pinned public checkpoint and speech on ephemeral runner
+        run: |
+          python3 -m venv /tmp/fourier-swift-venv
+          /tmp/fourier-swift-venv/bin/pip -q install huggingface_hub
+          /tmp/fourier-swift-venv/bin/python - <<'PY'
+          from huggingface_hub import snapshot_download
+          from urllib.request import urlretrieve
+          from pathlib import Path
+          import wave, hashlib
+          p=Path('/tmp/fourier-swift-fixture')
+          p.mkdir()
+          snapshot_download("oruk/oruk-fourier-2b",revision="8c2a8871f1304aa2f634da4fb95e24438c4945b9",local_dir=p/'model')
+          urlretrieve("https://raw.githubusercontent.com/ggml-org/whisper.cpp/b0a11594aec50892a02cd8d129eee2dfe93a8bb8/samples/jfk.wav",p/'jfk.wav')
+          assert hashlib.sha256((p/'jfk.wav').read_bytes()).hexdigest()=="59dfb9a4acb36fe2a2affc14bacbee2920ff435cb13cc314a08c13f66ba7860e"
+          with wave.open(str(p/'jfk.wav')) as w:
+              assert (w.getsampwidth(),w.getframerate(),w.getnchannels()) == (2,16000,1)
+              (p/'audio.s16le').write_bytes(w.readframes(w.getnframes()))
+          PY
+      - name: Transcribe with the native Swift runtime
+        env:
+          HF_HUB_OFFLINE: "1"
+        run: >
+          xcodebuild test-without-building -scheme MLXAudio-Package -destination 'platform=macOS'
+          -derivedDataPath /tmp/FourierDerived -parallel-testing-enabled NO
+          -only-testing:'MLXAudioTests/FourierReleaseSmoke'
+          MACOSX_DEPLOYMENT_TARGET=14.0 CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO
