@@ -7,22 +7,21 @@ permissions:
 jobs:
   picker:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
     env:
       CARGO_INCREMENTAL: '0'
       CARGO_PROFILE_DEV_DEBUG: '0'
       CMAKE_POLICY_VERSION_MINIMUM: '3.5'
-      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: --remote-debugging-port=9777
     steps:
       - uses: actions/checkout@v4
         with:
           repository: Nathan-Roll1/lumen-asr
-          ref: ab891bbe1f1da360b8d83259e1b1bef411df1733
+          ref: 850949c0986261b3c7c0b4f957af57c0e5d90f8f
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Build the product and enable its embedded production frontend
+      - name: Build production UI and add a same-WebView test driver
         shell: pwsh
         run: |
           cd apps/desktop
@@ -30,59 +29,73 @@ jobs:
           if ($LASTEXITCODE) {exit $LASTEXITCODE}
           npm run build
           if ($LASTEXITCODE) {exit $LASTEXITCODE}
+          @'
+          (async () => {
+            if(new URLSearchParams(location.search).get('window') === 'capsule') return;
+            const pause = ms => new Promise(r=>setTimeout(r,ms));
+            const button = (s) => Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()===s && b.getClientRects().length);
+            const report = (s) => {console.info(s); const i=new Image();i.src='http://127.0.0.1:9778/mark?line='+encodeURIComponent(s);};
+            let clicked=false;
+            for(let i=0;i<450;i++) {
+              try {
+                const close=document.querySelector('button[aria-label="关闭设置"]');
+                if(close && close.getClientRects().length) close.click();
+                if(!document.querySelector('nav.settings-tabs')) button('设置')?.click();
+                const pick=button('下载 Oruk Fourier 2B 英语模型');
+                if(!clicked && pick && !pick.disabled){report('VISIBLE and CLICKED real optional Fourier picker');pick.click();clicked=true;}
+                if(clicked && (i%2===0)){
+                  const s=await window.__TAURI_INTERNALS__.invoke('check_asr_model_status');
+                  if(s.fourierReady && s.activeEngine==='qwen' && s.activeModelDir.includes('oruk-fourier-2b-sherpa-int8')){
+                    const c=s.candidates.find(c=>c.ready && c.path===s.activeModelDir && c.engine==='qwen');
+                    if(!c || s.standardQwenReady)throw Error('unexpected candidate or base-model status');
+                    const input=Array.from(document.querySelectorAll('input')).some(e=>e.value===s.activeModelDir);
+                    if(input){report('PASS native Windows picker and selection displayed; active='+s.activeModelDir);return;}
+                  }
+                }
+              }catch(e){report('driver '+e)}
+              await pause(1000);
+            }
+            report('TIMEOUT '+document.body.innerText.slice(0,700));
+          })();
+          '@ | Set-Content -Encoding utf8 'dist/fourier-integration-test.js'
+          $p = (Resolve-Path 'dist/index.html').Path
+          $html = [IO.File]::ReadAllText($p).Replace('</body>', '<script src="/fourier-integration-test.js"></script></body>')
+          [IO.File]::WriteAllText($p, $html)
           cd ../..
           cargo build --locked -p lumen-asr-desktop --features custom-protocol
           if ($LASTEXITCODE) {exit $LASTEXITCODE}
-      - name: Install the browser test driver and run the real desktop application
+      - name: Start the instrumented desktop, then verify its native model files and saved configuration
         shell: pwsh
         run: |
-          $env:LUMEN_MODELS_DIR = Join-Path $env:RUNNER_TEMP 'lumen-clean-picker-models'
-          if (Test-Path $env:LUMEN_MODELS_DIR) {throw 'Expected empty models root'}
-          $bin = (Resolve-Path 'target/debug/lumen-asr-desktop.exe').Path
-          $stdio = Join-Path $env:RUNNER_TEMP 'lumen-stdout.txt'
-          $stderr = Join-Path $env:RUNNER_TEMP 'lumen-stderr.txt'
-          $p = Start-Process $bin -PassThru -RedirectStandardOutput $stdio -RedirectStandardError $stderr
-          try {
-            cd $env:RUNNER_TEMP
-            npm install --silent --no-audit --no-fund playwright-core@1.56.0
-            @'
-          const {chromium}=require('playwright-core');
-          const assert=require('node:assert/strict');
-          const path=require('node:path');
-          const fs=require('node:fs');
-          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-          (async()=>{
-            let browser;
-            for(let i=0;i<50 && !browser;i++){try{browser=await chromium.connectOverCDP('http://127.0.0.1:9777');}catch{await sleep(1000)}}
-            assert(browser,'WebView2 remote inspection available');let page;
-            for(let i=0;i<30 && !page;i++){page=browser.contexts().flatMap(c=>c.pages()).find(p=>!p.url().includes('capsule') && p.url().includes('tauri'));if(!page)await sleep(1000)}
-            assert(page,'main app WebView'); console.log('native surface',page.url());
-            try {
-              const close=page.getByRole('button',{name:'关闭设置'});
-              if(await close.isVisible({timeout:3000})) await close.click();
-              const settings=page.getByRole('button',{name:'设置',exact:true});await settings.click({timeout:15000});
-              const button=page.getByRole('button',{name:'下载 Oruk Fourier 2B 英语模型'});
-              await button.waitFor({timeout:15000});console.log('VISIBLE optional Fourier install button');
-              await button.click({timeout:120000});console.log('CLICKED optional Fourier install');
-              await page.waitForFunction(async()=>{
-                const s=await window.__TAURI_INTERNALS__.invoke('check_asr_model_status');
-                return s.activeEngine==='qwen' && s.fourierReady && s.activeModelDir.includes('oruk-fourier-2b-sherpa-int8');
-              },undefined,{timeout:360000,polling:1500});
-              const state=await page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('check_asr_model_status'));
-              assert(state.candidates.some(c=>c.ready && c.engine==='qwen' && c.path===state.activeModelDir));
-              assert(!state.standardQwenReady);
-              const files=fs.readdirSync(state.activeModelDir,{recursive:true}).map(String).filter(f=>fs.statSync(path.join(state.activeModelDir,f)).isFile());
-              console.log('ACTIVE native engine='+state.activeEngine+' ready='+state.fourierReady+' managedFiles='+files.length);
-              assert(files.includes('decoder.int8.onnx.data')&&files.includes('encoder.int8.onnx.data'));
-              await page.reload();await settings.click({timeout:15000});
-              assert(await button.count()===0);console.log('PASS cold native desktop download and persisted selection');
-            }catch(e){console.error('visible text', (await page.locator('body').innerText()).slice(0,3300)); throw e}
-            finally {await browser.close()}
-          })().catch(e=>{console.error(e);process.exitCode=1});
-          '@ | Set-Content -Encoding utf8 .\lumen-picker.cjs
-            node .\lumen-picker.cjs
-            if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          } finally {
-            if (!$p.HasExited) {Stop-Process -Id $p.Id -Force}
-            Get-Content $stderr -Tail 22 -ErrorAction SilentlyContinue
-          }
+          $env:LUMEN_MODELS_DIR=Join-Path $env:RUNNER_TEMP 'lumen-clean-picker-models'
+          if (Test-Path $env:LUMEN_MODELS_DIR) {throw 'Expected an empty models root'}
+          $bin=(Resolve-Path 'target/debug/lumen-asr-desktop.exe').Path
+          cd $env:RUNNER_TEMP
+          @'
+          const {spawn}=require('node:child_process'),http=require('node:http'),fs=require('node:fs'),path=require('node:path');
+          let app,done=false;let sawClick=false;
+          function stop(code){if(done)return;done=true;clearTimeout(timer);if(app)app.kill();server.close();process.exitCode=code}
+          const server=http.createServer((req,res)=>{
+            const msg=new URL(req.url,'http://127.0.0.1').searchParams.get('line')||'';
+            console.log(msg);res.setHeader('Access-Control-Allow-Origin','*');res.setHeader('Access-Control-Allow-Private-Network','true');res.end('ok');
+            if(msg.includes('VISIBLE and CLICKED'))sawClick=true;
+            if(msg.startsWith('PASS')){
+              try {
+                const assert=require('node:assert/strict');assert(sawClick);
+                const model=path.join(process.env.LUMEN_MODELS_DIR,'oruk-fourier-2b-sherpa-int8');
+                const f=fs.readdirSync(model,{recursive:true}).map(x=>path.join(model,x)).filter(x=>fs.statSync(x).isFile());
+                const bytes=f.reduce((sum,p)=>sum+fs.statSync(p).size,0);
+                assert.equal(f.length,10);assert.equal(bytes,2409908809);
+                const candidates=[process.env.LOCALAPPDATA,process.env.APPDATA].map(p=>path.join(p,'LumenAsr','config.toml'));
+                const cfgFile=candidates.find(p=>fs.existsSync(p));
+                assert(cfgFile,'saved config');const cfg=fs.readFileSync(cfgFile,'utf8');
+                assert(cfg.includes('oruk-fourier-2b-sherpa-int8'));assert(cfg.includes('local_qwen'));console.log('PASS 10 file checksums accepted by downloader; bytes='+bytes+'; persisted active Fourier selection');
+                stop(0);
+              }catch(e){console.error(e);stop(1)}
+            }else if(msg.startsWith('TIMEOUT'))stop(1);
+          });
+          const timer=setTimeout(()=>{ console.error('Desktop result deadline exceeded');stop(1); },510000);
+          server.listen(9778,'127.0.0.1',()=>{app=spawn(process.argv[2],[],{stdio:'inherit'});app.on('error',e=>{console.error(e);stop(1)});app.on('exit',code=>{if(!done){console.error('Unexpected desktop exit '+code);stop(1)}})});
+          '@ | Set-Content -Encoding utf8 .\windows-native-smoke.cjs
+          node .\windows-native-smoke.cjs $bin
+          exit $LASTEXITCODE
