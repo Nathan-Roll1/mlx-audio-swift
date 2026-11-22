@@ -1,0 +1,88 @@
+name: Verify Lumen's native Fourier Windows desktop picker
+on:
+  push:
+    branches: [ci/lumen-fourier-installed-desktop]
+permissions:
+  contents: read
+jobs:
+  picker:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CMAKE_POLICY_VERSION_MINIMUM: '3.5'
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: --remote-debugging-port=9777
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: Nathan-Roll1/lumen-asr
+          ref: ab891bbe1f1da360b8d83259e1b1bef411df1733
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build the product and enable its embedded production frontend
+        shell: pwsh
+        run: |
+          cd apps/desktop
+          npm ci
+          if ($LASTEXITCODE) {exit $LASTEXITCODE}
+          npm run build
+          if ($LASTEXITCODE) {exit $LASTEXITCODE}
+          cd ../..
+          cargo build --locked -p lumen-asr-desktop --features custom-protocol
+          if ($LASTEXITCODE) {exit $LASTEXITCODE}
+      - name: Install the browser test driver and run the real desktop application
+        shell: pwsh
+        run: |
+          $env:LUMEN_MODELS_DIR = Join-Path $env:RUNNER_TEMP 'lumen-clean-picker-models'
+          if (Test-Path $env:LUMEN_MODELS_DIR) {throw 'Expected empty models root'}
+          $bin = (Resolve-Path 'target/debug/lumen-asr-desktop.exe').Path
+          $stdio = Join-Path $env:RUNNER_TEMP 'lumen-stdout.txt'
+          $stderr = Join-Path $env:RUNNER_TEMP 'lumen-stderr.txt'
+          $p = Start-Process $bin -PassThru -RedirectStandardOutput $stdio -RedirectStandardError $stderr
+          try {
+            cd $env:RUNNER_TEMP
+            npm install --silent --no-audit --no-fund playwright-core@1.56.0
+            @'
+          const {chromium}=require('playwright-core');
+          const assert=require('node:assert/strict');
+          const path=require('node:path');
+          const fs=require('node:fs');
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          (async()=>{
+            let browser;
+            for(let i=0;i<50 && !browser;i++){try{browser=await chromium.connectOverCDP('http://127.0.0.1:9777');}catch{await sleep(1000)}}
+            assert(browser,'WebView2 remote inspection available');let page;
+            for(let i=0;i<30 && !page;i++){page=browser.contexts().flatMap(c=>c.pages()).find(p=>!p.url().includes('capsule') && p.url().includes('tauri'));if(!page)await sleep(1000)}
+            assert(page,'main app WebView'); console.log('native surface',page.url());
+            try {
+              const close=page.getByRole('button',{name:'关闭设置'});
+              if(await close.isVisible({timeout:3000})) await close.click();
+              const settings=page.getByRole('button',{name:'设置',exact:true});await settings.click({timeout:15000});
+              const button=page.getByRole('button',{name:'下载 Oruk Fourier 2B 英语模型'});
+              await button.waitFor({timeout:15000});console.log('VISIBLE optional Fourier install button');
+              await button.click({timeout:120000});console.log('CLICKED optional Fourier install');
+              await page.waitForFunction(async()=>{
+                const s=await window.__TAURI_INTERNALS__.invoke('check_asr_model_status');
+                return s.activeEngine==='qwen' && s.fourierReady && s.activeModelDir.includes('oruk-fourier-2b-sherpa-int8');
+              },undefined,{timeout:360000,polling:1500});
+              const state=await page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('check_asr_model_status'));
+              assert(state.candidates.some(c=>c.ready && c.engine==='qwen' && c.path===state.activeModelDir));
+              assert(!state.standardQwenReady);
+              const files=fs.readdirSync(state.activeModelDir,{recursive:true}).map(String).filter(f=>fs.statSync(path.join(state.activeModelDir,f)).isFile());
+              console.log('ACTIVE native engine='+state.activeEngine+' ready='+state.fourierReady+' managedFiles='+files.length);
+              assert(files.includes('decoder.int8.onnx.data')&&files.includes('encoder.int8.onnx.data'));
+              await page.reload();await settings.click({timeout:15000});
+              assert(await button.count()===0);console.log('PASS cold native desktop download and persisted selection');
+            }catch(e){console.error('visible text', (await page.locator('body').innerText()).slice(0,3300)); throw e}
+            finally {await browser.close()}
+          })().catch(e=>{console.error(e);process.exitCode=1});
+          '@ | Set-Content -Encoding utf8 .\lumen-picker.cjs
+            node .\lumen-picker.cjs
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          } finally {
+            if (!$p.HasExited) {Stop-Process -Id $p.Id -Force}
+            Get-Content $stderr -Tail 22 -ErrorAction SilentlyContinue
+          }
