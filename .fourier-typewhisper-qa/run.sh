@@ -54,6 +54,8 @@ killall TypeWhisper || true
 sleep 2
 defaults write "$domain" plugin.com.typewhisper.qwen3.loadedModel -string "$modelid"
 defaults write "$domain" plugin.com.typewhisper.qwen3.selectedModel -string "$modelid"
+defaults write "$domain" selectedEngine -string qwen3
+defaults write "$domain" modelAutoUnloadSeconds -int 0
 defaults write "$domain" fileTranscriptionEngine -string qwen3
 defaults write "$domain" fileTranscriptionModel -string "$modelid"
 defaults write "$domain" fileTranscriptionLanguage -string en
@@ -71,7 +73,12 @@ mkdir -p ui/Runner ui/Tests
 cp "$GITHUB_WORKSPACE/.fourier-typewhisper-qa/SignedAppUI.swift" ui/Tests/
 cat > ui/Runner/Main.swift <<'EOF'
 import SwiftUI
-@main struct Empty: App {var body: some Scene {WindowGroup {Text("Local GUI QA")}}}
+@main struct Empty: App {
+    @State private var contents = ""
+    var body: some Scene {
+        WindowGroup { TextEditor(text: $contents).accessibilityIdentifier("pasteTestField").frame(minWidth: 300, minHeight: 120) }
+    }
+}
 EOF
 cat > ui/project.yml <<'EOF'
 name: ReleaseUI
@@ -109,6 +116,7 @@ xcodegen generate
 set +e
 xcodebuild test -scheme ReleaseUI -destination 'platform=macOS' -parallel-testing-enabled NO CODE_SIGN_IDENTITY=- > "$base/ui.log" 2>&1
 ret=$?
-grep -E 'SERVICES_NAME|SIGNED_GUI_TRANSCRIPT|error:|XCTAssert|failed|Test Case' "$base/ui.log" | tail -22 || true
+grep -E 'SERVICES_NAME|SIGNED_GUI_|GUI_TREE|error:|XCTAssert|failed|Test Case' "$base/ui.log" | tail -100 || true
+/usr/bin/log show --last 4m --style compact --predicate 'process == "TypeWhisper" && (messageType == error || messageType == fault)' | tail -40 || true
 echo "SIGNED_GUI_EXIT=$ret"
 exit "$ret"
