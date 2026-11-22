@@ -32,7 +32,7 @@ final class SignedAppUI: XCTestCase {
                             print("SIGNED_GUI_AUTOMATIC_MIC_PASTE", visible)
                             return
                         }
-                        RunLoop.current.run(until: Date().addingTimeInterval(.35))
+                        RunLoop.current.run(until: Date().addingTimeInterval(0.35))
                     }
                     // Only paste a transcript already placed on the clipboard by the app.
                     let clip = NSPasteboard.general.string(forType: .string) ?? ""
@@ -62,7 +62,7 @@ final class SignedAppUI: XCTestCase {
                     }
                 }
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(.5))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
         }
         XCTFail("The unmodified application did not return the microphone transcript in time.")
     }
